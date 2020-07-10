@@ -5,12 +5,13 @@
 #include "../header/tcp_proxy.h"
 
 #define OPEN_MAX 20480
+#define MAX_LINE 1024
 
 
 
 pthread_mutex_t conn_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-void proxy_epoll(struct proxy *proxy_info)
+void proxy_epoll(struct proxy *proxy_info,struct statistics * statistics_info)
 {
 
     int client_num=0;
@@ -56,7 +57,7 @@ void proxy_epoll(struct proxy *proxy_info)
             if(event_tmp->epoll_fd == listen_fd)  //监听描述符有新请求
             {
             
-                res = accept_and_conn(ep_fd, listen_fd, proxy_info);
+                res = accept_and_conn(ep_fd, listen_fd, proxy_info,statistics_info);
                 if(res == -1)
                 {
                     printf("accept_and_conn error\n");
@@ -65,7 +66,7 @@ void proxy_epoll(struct proxy *proxy_info)
             } 
             else
             {
-                res = info_transmit(ep_fd, event_tmp);
+                res = info_transmit(ep_fd, event_tmp,statistics_info);
                 if(res == -1)
                 {
                     printf("trans error\n");
@@ -77,20 +78,57 @@ void proxy_epoll(struct proxy *proxy_info)
     }
 }
 
-int info_transmit(int ep_fd, struct event *trans_event)
+static void refresh_data_info(int c_s,int len,struct statistics * statistics_info)
 {
-    trans_event->buffer_len = recv(trans_event->epoll_fd,trans_event->buffer,sizeof(trans_event->buffer),0);
-    if(trans_event->buffer_len > 0)
+    if (0 == c_s)
     {
-        trans_event->buffer_len = send(trans_event->dst_fd, trans_event->buffer, trans_event->buffer_len, 0);
+        pthread_mutex_lock(&(statistics_info->request_data_mutex));
+        statistics_info->client_to_proxy_data += len;
+        statistics_info->proxy_to_server_data += len;
+        pthread_mutex_unlock(&(statistics_info->request_data_mutex));
+    }
+    else
+    {
+        pthread_mutex_lock(&(statistics_info->response_data_mutex));
+        statistics_info->proxy_to_client_data += len;
+        statistics_info->server_to_proxy_data += len;
+        pthread_mutex_unlock(&(statistics_info->response_data_mutex));
+    }
+}
+
+int info_transmit(int ep_fd, struct event *trans_event,struct statistics * statistics_info)
+{
+    int len;
+    char buffer[MAX_LINE];
+    len = recv(trans_event->epoll_fd,buffer,sizeof(buffer),0);
+
+    //refresh_data_info(trans_event->c_s,len,statistics_info);
+
+    if(len > 0)
+    {
+        len = send(trans_event->dst_fd, buffer, len, 0);
+        refresh_data_info(trans_event->c_s,len,statistics_info);
         //printf("%s\n",trans_event->buffer);
         return 1;
     }
-    else if(trans_event->buffer_len == 0)
+    else if(len == 0)
     {
-        printf("client closed\n");
-        epoll_ctl(ep_fd,EPOLL_CTL_DEL,trans_event->epoll_fd,NULL);
-        epoll_ctl(ep_fd,EPOLL_CTL_DEL,trans_event->dst_fd,NULL);
+        //printf("client closed\n");
+        epoll_ctl(ep_fd, EPOLL_CTL_DEL, trans_event->epoll_fd, NULL);
+        epoll_ctl(ep_fd, EPOLL_CTL_DEL, trans_event->dst_fd, NULL);
+        //互斥统计完成连接数
+        pthread_mutex_lock(&(statistics_info->connections_finished_mutex));
+        statistics_info->client_proxy_connections_finished++;
+        statistics_info->proxy_server_connections_finished++;
+        pthread_mutex_unlock(&(statistics_info->connections_finished_mutex));
+
+        pthread_mutex_lock(&(statistics_info->client_proxy_connections_now_mutex));
+        statistics_info->client_proxy_connections_now--;
+        pthread_mutex_unlock(&(statistics_info->client_proxy_connections_now_mutex));
+
+        pthread_mutex_lock(&(statistics_info->proxy_server_connections_now_mutex));
+        statistics_info->proxy_server_connections_now--;
+        pthread_mutex_unlock(&(statistics_info->proxy_server_connections_now_mutex));
         close(trans_event->epoll_fd);
         close(trans_event->dst_fd);
         return 1;
@@ -102,7 +140,7 @@ int info_transmit(int ep_fd, struct event *trans_event)
     }
 }
 
-int accept_and_conn(int ep_fd, int listen_fd, struct proxy *proxy_info)
+int accept_and_conn(int ep_fd, int listen_fd, struct proxy *proxy_info,struct statistics * statistics_info)
 {
     int client_fd,server_fd;
     int res;
@@ -114,6 +152,15 @@ int accept_and_conn(int ep_fd, int listen_fd, struct proxy *proxy_info)
     struct event * server_event_info = (struct event *)malloc(sizeof(struct event));
 
     client_fd = accept(listen_fd, (struct sockaddr *)&client_addr, &client_addr_len);
+
+    pthread_mutex_lock(&(statistics_info->client_proxy_connections_now_mutex));
+    statistics_info->client_proxy_CPS++;
+    statistics_info->client_proxy_connections_all++;
+    pthread_mutex_unlock(&(statistics_info->client_proxy_connections_now_mutex));
+
+    pthread_mutex_lock(&(statistics_info->client_proxy_connections_now_mutex));
+    statistics_info->client_proxy_connections_now++;
+    pthread_mutex_unlock(&(statistics_info->client_proxy_connections_now_mutex));
 
     server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd == -1)
@@ -130,12 +177,25 @@ int accept_and_conn(int ep_fd, int listen_fd, struct proxy *proxy_info)
         printf("connect error\n");
         return -1;
     }
+    //互斥访问代理程序与服务器每秒建立连接数以及总连接数
+    pthread_mutex_lock(&(statistics_info->proxy_server_connections_mutex));
+    statistics_info->proxy_server_CPS++;
+    statistics_info->proxy_server_connections_all++;
+    pthread_mutex_unlock(&(statistics_info->proxy_server_connections_mutex));
+
+    //互斥访问正在处理的代理程序与服务器连接数
+    pthread_mutex_lock(&(statistics_info->proxy_server_connections_now_mutex));
+    statistics_info->proxy_server_connections_now++;
+    pthread_mutex_unlock(&(statistics_info->proxy_server_connections_now_mutex));
+
+
     client_event_info->epoll_fd = client_fd;
     client_event_info->dst_fd = server_fd;
-    client_event_info->buffer_len = 0;
+    client_event_info->c_s = 0;
 
     client_event.events = EPOLLIN;
     client_event.data.ptr = (void *)client_event_info;
+
 
     res = epoll_ctl(ep_fd, EPOLL_CTL_ADD, client_fd, &client_event);
     if (res == -1)
@@ -146,7 +206,8 @@ int accept_and_conn(int ep_fd, int listen_fd, struct proxy *proxy_info)
 
     server_event_info->epoll_fd = server_fd;
     server_event_info->dst_fd = client_fd;
-    server_event_info->buffer_len = 0;
+    server_event_info->c_s = 1;
+
 
     server_event.events = EPOLLIN;
     server_event.data.ptr = (void *)server_event_info;
@@ -156,7 +217,7 @@ int accept_and_conn(int ep_fd, int listen_fd, struct proxy *proxy_info)
         printf("epoll add server error\n");
         return -1;
     }
-    printf("conn ect\n");
+    //printf("conn ect\n");
     return 0;
 }
 

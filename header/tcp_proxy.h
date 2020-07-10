@@ -38,13 +38,13 @@ struct event
 {
     int epoll_fd;
     int dst_fd;
-    char buffer[1024];
-    int buffer_len;
+    int c_s;//0:c->s;   1 : s->c;
 };
 
-int info_transmit(int ep_fd, struct event *trans_event);
-int accept_and_conn(int ep_fd, int listen_fd, struct proxy *proxy_info);
-void proxy_epoll(struct proxy *proxy_info);
+int info_transmit(int ep_fd, struct event *trans_event,struct statistics * statistics_info);
+int accept_and_conn(int ep_fd, int listen_fd, struct proxy *proxy_info,struct statistics * statistics_info);
+void proxy_epoll(struct proxy *proxy_info,struct statistics * statistics_info);
+
 void proxy_process(int listen_port, char *server_ip, int server_port,int access_log,struct statistics * statistics_info);
 void *handle_request(void *arg);
 #endif
