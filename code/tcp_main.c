@@ -13,22 +13,26 @@
 int main(){ 
     int i=0,proxy_num=0;
     struct proxy* proxy_info = get_conf_info(&proxy_num);
-    struct statistics * statistics_info = statisticsInit();  //初始化统计数据结构体
+    struct statistics * statistics_info = statistics_init();  //初始化统计数据结构体
     int pid[proxy_num],pid_statistics;
     int accessLog = open("access.log",O_RDWR | O_APPEND);  //打开日志文件
 
-    if((pid_statistics = fork()) == 0)         //统计数据循环输出进程
-    {
-        proxy_show_statisitcs(statistics_info);
-        exit(1);
-    }
+    // if((pid_statistics = fork()) == 0)         //统计数据循环输出进程
+    // {
+    //     proxy_show_statisitcs(statistics_info);
+    //     exit(1);
+    // }
+    printf("proxy_num:%d\n",proxy_num);
 
-    if ((pid[i] = fork()) == 0)
+    for(i = 0; i < proxy_num; ++i)
     {
-        proxy_epoll(&proxy_info[i],statistics_info);
-        //proxy_process(proxy_info[i].listen_port, proxy_info[i].server_ip, proxy_info[i].server_port, accessLog, statistics_info);
-        //printf("tuichule:%d\n",getpid());
-        exit(1);
+        if ((pid[i] = fork()) == 0)
+        {
+            proxy_epoll(&proxy_info[i], statistics_info);
+            //proxy_process(proxy_info[i].listen_port, proxy_info[i].server_ip, proxy_info[i].server_port, accessLog, statistics_info);
+            //printf("tuichule:%d\n",getpid());
+            exit(1);
+        }
     }
     int state;
     wait(&state);

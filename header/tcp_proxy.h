@@ -13,6 +13,9 @@
 #include <pthread.h>
 #include <sys/time.h>
 #include <sys/types.h>
+#include <aio.h>
+#include <errno.h>
+#include <errno.h>
 #include "tcp_statistics.h"
 #include "tcp_conf.h"
 
@@ -34,14 +37,21 @@ struct request_info         //请求信息结构体
     struct statistics *statistics_info;  //输出统计信息结构体
 };
 
+
 struct event
 {
     int epoll_fd;
+    int src_fd;
     int dst_fd;
     int c_s;//0:c->s;   1 : s->c;
+    struct aiocb *r_cb;
+    struct aiocb *w_cb;
+    struct statistics *statistics_info;
+    struct epoll_event *epoll_event_src;
+    struct epoll_event *epoll_event_dst;
 };
 
-int info_transmit(int ep_fd, struct event *trans_event,struct statistics * statistics_info);
+int info_transmit(struct event *trans_event);
 int accept_and_conn(int ep_fd, int listen_fd, struct proxy *proxy_info,struct statistics * statistics_info);
 void proxy_epoll(struct proxy *proxy_info,struct statistics * statistics_info);
 

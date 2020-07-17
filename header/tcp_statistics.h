@@ -49,7 +49,7 @@ struct statistics
     pthread_mutexattr_t mutex_attr;
 };
 
-struct statistics * statisticsInit();
+struct statistics * statistics_init();
 void proxy_show_statisitcs(struct statistics *statistics_info);
 
 #endif

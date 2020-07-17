@@ -1,6 +1,6 @@
 #include "../header/tcp_statistics.h"
 
-struct statistics * statisticsInit()
+struct statistics * statistics_init()
 {
     int fd = open("/dev/zero",O_RDWR);
     struct statistics * statistics_info = mmap(NULL,sizeof(struct statistics),PROT_READ|PROT_WRITE,MAP_SHARED,fd,0);

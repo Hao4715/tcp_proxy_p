@@ -5,7 +5,7 @@ target = tcp_proxy
 CC = gcc
 
 $(target): $(obj)
-	$(CC) $(obj) -o $(target) -lpthread
+	$(CC) $(obj) -o $(target) -lpthread -lrt
 %.o: %.c
 	$(CC) -c $< -o $@
 # tcp_proxy : tcp_main.o  tcp_conf.o tcp_proxy.o tcp_sock.o
